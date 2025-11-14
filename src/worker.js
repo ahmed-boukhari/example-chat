@@ -1,18 +1,20 @@
 
 import {
     AutoTokenizer,
+    AutoModelForSeq2SeqLM,
     AutoModelForCausalLM,
     TextStreamer,
     StoppingCriteria,
     env
 } from '@huggingface/transformers';
 
-env.localModelPath = 'models';
+env.localModelPath = '/Users/ahhmed/Downloads/transformers.js-main/examples/webgpu-chat/models/';
 env.allowRemoteModels = false;
+env.allowLocalModels = true;
 
 //https://github.com/microsoft/onnxruntime/issues/24325
 //https://github.com/huggingface/transformers.js/?tab=readme-ov-file
-// env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+env.backends.onnx.wasm.wasmPaths = '/Users/ahhmed/Downloads/transformers.js-main/examples/webgpu-chat/wasm/';
 
 class CallbackTextStreamer extends TextStreamer {
     constructor(tokenizer, cb) {
@@ -62,26 +64,22 @@ async function hasFp16() {
  * This class uses the Singleton pattern to ensure that only one instance of the model is loaded.
  */
 class TextGenerationPipeline {
-    static model_id = null;
     static model = null;
     static tokenizer = null;
     static streamer = null;
+    static model_id = null;
+    static dtype = null;
 
     static async getInstance(progress_callback = null) {
         // Choose the model based on whether fp16 is available
-        this.model_id ??= (await hasFp16())
-            ? 'Xenova/Phi-3-mini-4k-instruct_fp16'
-            : 'Xenova/Phi-3-mini-4k-instruct';
-
-        this.tokenizer ??= AutoTokenizer.from_pretrained(this.model_id, {
-            legacy: true,
+         this.tokenizer ??= AutoTokenizer.from_pretrained(this.model_id, {
             progress_callback,
         });
+        this.tokenizer.then(t => console.log('tokenizer:', t.config.tokenizer_class));
 
         this.model ??= AutoModelForCausalLM.from_pretrained(this.model_id, {
-            dtype: 'q4',
-            device: 'auto',
-            use_external_data_format: true,
+            dtype: this.dtype,
+            device: "auto",
             progress_callback,
         });
 
@@ -133,12 +131,13 @@ async function generate(messages) {
     });
 }
 
-async function load() {
+async function load(model_id, dtype) {
     self.postMessage({
         status: 'loading',
         data: 'Loading model...'
     });
-
+    TextGenerationPipeline.model_id ??= model_id;
+    TextGenerationPipeline.dtype ??= dtype;
     // Load the pipeline and save it for future use.
     const [tokenizer, model] = await TextGenerationPipeline.getInstance(x => {
         // We also add a progress callback to the pipeline so that we can
@@ -162,7 +161,7 @@ self.addEventListener('message', async (e) => {
 
     switch (type) {
         case 'load':
-            load();
+            load(data.model_id, data.dtype);
             break;
 
         case 'generate':
